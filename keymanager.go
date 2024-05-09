@@ -173,6 +173,9 @@ func (l *LocalKeyManager) flushKeys() {
 // unmarshals them into the appropriate data structures, and updates the local key manager's keys.
 // If any error occurs during the process, it is returned.
 func (l *LocalKeyManager) loadKeys(basePath string) error {
+	l.m.Lock()
+	defer l.m.Unlock()
+
 	backupKeys, err := os.ReadFile(path.Join(basePath, BackupKeysFileName))
 	if err != nil {
 		return err
