@@ -2,7 +2,10 @@ package keymanager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -11,6 +14,9 @@ import (
 
 const (
 	LocalKeyManagerType = "local"
+
+	BackupKeysFileName    = "key_backup.txt"
+	BackupLastKeyFileName = "last_key_backup.txt"
 )
 
 // Key represents a key with its associated metadata.
@@ -46,11 +52,12 @@ func NewKeyManager(ctx context.Context, opts *Opts) (KeyManager, error) {
 
 // LocalKeyManager is a key manager implementation that stores keys locally in memory.
 type LocalKeyManager struct {
-	keys        map[string]*Key // The map of keys stored in the LocalKeyManager.
-	lastKey     *Key            // The last key stored in the LocalKeyManager.
-	keyCount    int             // The desired count of keys to be stored.
-	keyLifeTime time.Duration   // The lifetime of each key.
-	m           sync.Mutex      // The mutex for synchronizing access to the keys.
+	keys         map[string]*Key // The map of keys stored in the LocalKeyManager.
+	lastKey      *Key            // The last key stored in the LocalKeyManager.
+	keyCount     int             // The desired count of keys to be stored.
+	keyLifeTime  time.Duration   // The lifetime of each key.
+	flushEnabled bool            // The flag to enable/disable flushing of keys.
+	m            sync.Mutex      // The mutex for synchronizing access to the keys.
 }
 
 // LocalKeyManagerOpts represents the options for creating a LocalKeyManager.
@@ -58,6 +65,8 @@ type LocalKeyManagerOpts struct {
 	KeyCount              int           // The desired count of keys to be stored.
 	KeyLifeTime           time.Duration // The lifetime of each key.
 	BackgroundJobInterval time.Duration // The interval at which the background job runs.
+	FlushEnabled          bool          // The flag to enable/disable flushing of keys.
+	BackupFilePath        string        // The file path for backing up keys.
 }
 
 // NewLocalKeyManager creates a new instance of LocalKeyManager.
@@ -66,14 +75,22 @@ type LocalKeyManagerOpts struct {
 // Returns a pointer to the created LocalKeyManager and any error encountered during initialization.
 func NewLocalKeyManager(ctx context.Context, opts *LocalKeyManagerOpts) (*LocalKeyManager, error) {
 	keyManager := &LocalKeyManager{
-		keys:        make(map[string]*Key),
-		lastKey:     nil,
-		keyCount:    opts.KeyCount,
-		keyLifeTime: opts.KeyLifeTime,
-		m:           sync.Mutex{},
+		keys:         make(map[string]*Key),
+		lastKey:      nil,
+		keyCount:     opts.KeyCount,
+		keyLifeTime:  opts.KeyLifeTime,
+		flushEnabled: opts.FlushEnabled,
+		m:            sync.Mutex{},
 	}
 
-	keyManager.createKeys()
+	if opts.BackupFilePath != "" {
+		keyManager.lastKey = &Key{}
+		if err := keyManager.loadKeys(opts.BackupFilePath); err != nil {
+			return nil, err
+		}
+	} else {
+		keyManager.createKeys()
+	}
 	go keyManager.run(opts.BackgroundJobInterval)
 
 	return keyManager, nil
@@ -87,6 +104,9 @@ func (l *LocalKeyManager) run(backgroundJobInterval time.Duration) {
 	for range ticker.C {
 		l.deleteExpiredKeys()
 		l.createKeys()
+		if l.flushEnabled {
+			l.flushKeys()
+		}
 	}
 }
 
@@ -122,6 +142,58 @@ func (l *LocalKeyManager) createKeys() {
 		l.keys[key.KeyID] = key
 		l.lastKey = key
 	}
+}
+
+// getKeyList returns a list of keys stored in the LocalKeyManager.
+func (l *LocalKeyManager) getKeyList() []*Key {
+	l.m.Lock()
+	defer l.m.Unlock()
+
+	keys := make([]*Key, len(l.keys))
+	idx := 0
+	for _, key := range l.keys {
+		keys[idx] = key
+		idx++
+	}
+
+	return keys
+}
+
+// flushKeys writes the key list and the last key to backup files.
+func (l *LocalKeyManager) flushKeys() {
+	keys := l.getKeyList()
+	jsonKeys, _ := json.Marshal(keys)
+	jsonLastKey, _ := json.Marshal(l.lastKey)
+	_ = os.WriteFile(BackupKeysFileName, jsonKeys, 0644)
+	_ = os.WriteFile(BackupLastKeyFileName, jsonLastKey, 0644)
+}
+
+// loadKeys loads the backup keys and last key from the specified base path.
+// It reads the backup keys and last key from the corresponding files in the base path,
+// unmarshals them into the appropriate data structures, and updates the local key manager's keys.
+// If any error occurs during the process, it is returned.
+func (l *LocalKeyManager) loadKeys(basePath string) error {
+	backupKeys, err := os.ReadFile(path.Join(basePath, BackupKeysFileName))
+	if err != nil {
+		return err
+	}
+	backupLastKey, err := os.ReadFile(path.Join(basePath, BackupLastKeyFileName))
+	if err != nil {
+		return err
+	}
+
+	keyList := make([]*Key, len(l.keys))
+	if err = json.Unmarshal(backupKeys, &keyList); err != nil {
+		return err
+	}
+	if err = json.Unmarshal(backupLastKey, &l.lastKey); err != nil {
+		return err
+	}
+	for _, key := range keyList {
+		l.keys[key.KeyID] = key
+	}
+
+	return nil
 }
 
 // GetKey retrieves the key associated with the given keyID from the local key manager.

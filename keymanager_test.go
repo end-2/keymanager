@@ -2,7 +2,10 @@ package keymanager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -155,4 +158,134 @@ func TestNewLocalKeyManager(t *testing.T) {
 	// Assert background job is running
 	time.Sleep(200 * time.Millisecond) // Wait for background job to run
 	assert.NotEqual(t, lastKey, keyManager.lastKey)
+}
+
+func TestLocalKeyManager_getKeyList(t *testing.T) {
+	l := &LocalKeyManager{
+		keys: make(map[string]*Key),
+	}
+
+	// Add some keys to the key manager
+	key1 := &Key{
+		KeyID:     "key1",
+		KeyValue:  "value1",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	key2 := &Key{
+		KeyID:     "key2",
+		KeyValue:  "value2",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	l.keys["key1"] = key1
+	l.keys["key2"] = key2
+
+	// Call the getKeyList method
+	result := l.getKeyList()
+
+	// Assert the length of the result
+	assert.Len(t, result, 2)
+
+	// Assert the contents of the result
+	assert.Contains(t, result, key1)
+	assert.Contains(t, result, key2)
+}
+
+func TestLocalKeyManager_flushKeys(t *testing.T) {
+	defer cleanup(".")
+
+	l := &LocalKeyManager{
+		keys: make(map[string]*Key),
+		lastKey: &Key{
+			KeyID:    "testKey",
+			KeyValue: "testValue",
+		},
+	}
+
+	// Add some keys to the key manager
+	key1 := &Key{
+		KeyID:    "key1",
+		KeyValue: "value1",
+	}
+	key2 := &Key{
+		KeyID:    "key2",
+		KeyValue: "value2",
+	}
+	l.keys["key1"] = key1
+	l.keys["key2"] = key2
+
+	// Call the flushKeys method
+	l.flushKeys()
+
+	// Assert the existence of the backup files
+	_, err := os.Stat("key_backup.txt")
+	assert.NoError(t, err)
+	_, err = os.Stat("last_key_backup.txt")
+	assert.NoError(t, err)
+
+	// Read the backup files
+	jsonKeys, err := os.ReadFile("key_backup.txt")
+	assert.NoError(t, err)
+	jsonLastKey, err := os.ReadFile("last_key_backup.txt")
+	assert.NoError(t, err)
+
+	// Unmarshal the backup data
+	var backupKeys []*Key
+	err = json.Unmarshal(jsonKeys, &backupKeys)
+	assert.NoError(t, err)
+	var backupLastKey *Key
+	err = json.Unmarshal(jsonLastKey, &backupLastKey)
+	assert.NoError(t, err)
+
+	// Assert the backup data
+	assert.Len(t, backupKeys, 2)
+	assert.Contains(t, backupKeys, key1)
+	assert.Contains(t, backupKeys, key2)
+	assert.Equal(t, l.lastKey, backupLastKey)
+	assert.Equal(t, l.lastKey.KeyID, backupLastKey.KeyID)
+}
+
+func TestLocalKeyManager_readKeys(t *testing.T) {
+	defer cleanup(".")
+
+	l := &LocalKeyManager{
+		keys: make(map[string]*Key),
+		lastKey: &Key{
+			KeyID:    "testKey",
+			KeyValue: "testValue",
+		},
+	}
+
+	// Add some keys to the key manager
+	key1 := &Key{
+		KeyID:    "key1",
+		KeyValue: "value1",
+	}
+	key2 := &Key{
+		KeyID:    "key2",
+		KeyValue: "value2",
+	}
+	l.keys["key1"] = key1
+	l.keys["key2"] = key2
+
+	// Call the flushKeys method
+	l.flushKeys()
+
+	// Assert the keys
+	expectedKeys := l.keys
+	expectedLastKey := l.lastKey
+
+	l.keys = make(map[string]*Key)
+	l.lastKey = &Key{}
+
+	l.loadKeys(".")
+
+	assert.Equal(t, expectedKeys, l.keys)
+	assert.Equal(t, expectedLastKey, l.lastKey)
+}
+
+func cleanup(basePath string) {
+	_ = os.Remove(path.Join(basePath, "key_backup.txt"))
+	_ = os.Remove(path.Join(basePath, "last_key_backup.txt"))
 }
