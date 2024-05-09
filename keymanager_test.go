@@ -160,7 +160,7 @@ func TestNewLocalKeyManager(t *testing.T) {
 	assert.NotEqual(t, lastKey, keyManager.lastKey)
 }
 
-func TestLocalKeyManager_getKeyList(t *testing.T) {
+func TestLocalKeyManager_getKeyMap(t *testing.T) {
 	l := &LocalKeyManager{
 		keys: make(map[string]*Key),
 	}
@@ -182,14 +182,12 @@ func TestLocalKeyManager_getKeyList(t *testing.T) {
 	l.keys["key2"] = key2
 
 	// Call the getKeyList method
-	result := l.getKeyList()
+	result := l.getKeyMap()
 
 	// Assert the length of the result
 	assert.Len(t, result, 2)
 
-	// Assert the contents of the result
-	assert.Contains(t, result, key1)
-	assert.Contains(t, result, key2)
+	assert.Equal(t, result, l.keys)
 }
 
 func TestLocalKeyManager_flushKeys(t *testing.T) {
@@ -231,7 +229,7 @@ func TestLocalKeyManager_flushKeys(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Unmarshal the backup data
-	var backupKeys []*Key
+	var backupKeys map[string]*Key
 	err = json.Unmarshal(jsonKeys, &backupKeys)
 	assert.NoError(t, err)
 	var backupLastKey *Key
@@ -240,10 +238,8 @@ func TestLocalKeyManager_flushKeys(t *testing.T) {
 
 	// Assert the backup data
 	assert.Len(t, backupKeys, 2)
-	assert.Contains(t, backupKeys, key1)
-	assert.Contains(t, backupKeys, key2)
+	assert.Equal(t, backupKeys, l.keys)
 	assert.Equal(t, l.lastKey, backupLastKey)
-	assert.Equal(t, l.lastKey.KeyID, backupLastKey.KeyID)
 }
 
 func TestLocalKeyManager_readKeys(t *testing.T) {

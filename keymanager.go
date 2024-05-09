@@ -144,16 +144,14 @@ func (l *LocalKeyManager) createKeys() {
 	}
 }
 
-// getKeyList returns a list of keys stored in the LocalKeyManager.
-func (l *LocalKeyManager) getKeyList() []*Key {
+// getKeyMap returns a map of key IDs to Key objects stored in the LocalKeyManager.
+func (l *LocalKeyManager) getKeyMap() map[string]*Key {
 	l.m.Lock()
 	defer l.m.Unlock()
 
-	keys := make([]*Key, len(l.keys))
-	idx := 0
-	for _, key := range l.keys {
-		keys[idx] = key
-		idx++
+	keys := make(map[string]*Key)
+	for keyID, key := range l.keys {
+		keys[keyID] = key
 	}
 
 	return keys
@@ -161,7 +159,8 @@ func (l *LocalKeyManager) getKeyList() []*Key {
 
 // flushKeys writes the key list and the last key to backup files.
 func (l *LocalKeyManager) flushKeys() {
-	keys := l.getKeyList()
+	keys := l.getKeyMap()
+
 	jsonKeys, _ := json.Marshal(keys)
 	jsonLastKey, _ := json.Marshal(l.lastKey)
 	_ = os.WriteFile(BackupKeysFileName, jsonKeys, 0644)
@@ -185,15 +184,11 @@ func (l *LocalKeyManager) loadKeys(basePath string) error {
 		return err
 	}
 
-	keyList := make([]*Key, len(l.keys))
-	if err = json.Unmarshal(backupKeys, &keyList); err != nil {
+	if err = json.Unmarshal(backupKeys, &l.keys); err != nil {
 		return err
 	}
 	if err = json.Unmarshal(backupLastKey, &l.lastKey); err != nil {
 		return err
-	}
-	for _, key := range keyList {
-		l.keys[key.KeyID] = key
 	}
 
 	return nil
